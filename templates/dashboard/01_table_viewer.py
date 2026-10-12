@@ -1,4 +1,4 @@
-"""Streamlit recipe: live table viewer with auto-refresh against CUBRID."""
+"""Streamlit recipe: table viewer with manual refresh against CUBRID."""
 
 from __future__ import annotations
 
