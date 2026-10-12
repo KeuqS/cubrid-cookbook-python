@@ -3,7 +3,7 @@
 Demonstrates how CUBRID serves as the backbone for an agentic workflow:
 1. Agent receives a user query
 2. Plans tool calls (recorded in agent_tool_calls)
-3. Executes against CUBRID via the MCP read-only whitelist
+3. Executes MCP-named tools directly through pycubrid (no MCP server)
 4. Observes results and decides next action
 5. Synthesizes a response (all turns stored in agent_messages)
 """
