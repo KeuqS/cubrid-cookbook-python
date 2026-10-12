@@ -119,6 +119,14 @@ read-only whitelist. The `04_agent_loop.py` example uses the same tool names
 for planning but executes them directly through pycubrid; it does not provide
 MCP server or whitelist enforcement.
 
+> **Warning:** `execute_query` in `04_agent_loop.py` runs whatever SQL it is
+> given, and recipes 01–04 connect as `dba` by default. Once a real LLM writes
+> that SQL (see [Connecting a Real LLM](#connecting-a-real-llm)), it can modify
+> or drop data. Before connecting one, route the tool calls through
+> `cubrid-mcp-server` in read-only mode as `02_mcp_toolchain.py` does, or
+> validate the statement as a read-only query yourself, and connect as a
+> least-privilege user.
+
 ## Why CUBRID for AI Agents
 
 | Feature | Benefit |

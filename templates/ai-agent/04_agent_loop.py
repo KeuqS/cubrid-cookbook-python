@@ -6,6 +6,10 @@ Demonstrates how CUBRID serves as the backbone for an agentic workflow:
 3. Executes the planned tool directly with pycubrid; the tool names mirror
    cubrid-mcp-server's, but no MCP server or read-only whitelist is involved
    (02_mcp_toolchain.py is the example that goes through the MCP server)
+   Warning: execute_query runs whatever SQL it is given, and the default
+   connection is the dba user, so once an LLM writes the SQL it can modify
+   or drop data. Validate it as read-only (or route it through the MCP
+   server, as 02 does) and connect as a least-privilege user first.
 4. Observes results and decides next action
 5. Synthesizes a response (all turns stored in agent_messages)
 """
