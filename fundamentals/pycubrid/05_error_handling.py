@@ -10,6 +10,7 @@ Demonstrates:
 from __future__ import annotations
 
 import pycubrid
+from pycubrid.connection import Connection
 
 DB_CONFIG = {
     "host": "localhost",
@@ -20,7 +21,7 @@ DB_CONFIG = {
 }
 
 
-def get_connection() -> pycubrid.Connection:
+def get_connection() -> Connection:
     return pycubrid.connect(**DB_CONFIG)
 
 
@@ -139,9 +140,9 @@ def error_recovery_pattern() -> None:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("DROP TABLE IF EXISTS cookbook_orders")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_error_orders")
     cursor.execute("""
-        CREATE TABLE cookbook_orders (
+        CREATE TABLE cookbook_error_orders (
             id     INT AUTO_INCREMENT PRIMARY KEY,
             item   VARCHAR(100),
             amount DOUBLE NOT NULL
@@ -163,7 +164,7 @@ def error_recovery_pattern() -> None:
     for item, amount in orders:
         try:
             cursor.execute(
-                "INSERT INTO cookbook_orders (item, amount) VALUES (?, ?)",
+                "INSERT INTO cookbook_error_orders (item, amount) VALUES (?, ?)",
                 (item, amount),
             )
             conn.commit()
@@ -175,11 +176,11 @@ def error_recovery_pattern() -> None:
 
     print(f"  ✓ Results: {successful} succeeded, {failed} failed")
 
-    cursor.execute("SELECT item, amount FROM cookbook_orders ORDER BY id")
+    cursor.execute("SELECT item, amount FROM cookbook_error_orders ORDER BY id")
     for row in cursor.fetchall():
         print(f"    {row[0]}: ${row[1]:.2f}")
 
-    cursor.execute("DROP TABLE IF EXISTS cookbook_orders")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_error_orders")
     conn.commit()
     cursor.close()
     conn.close()

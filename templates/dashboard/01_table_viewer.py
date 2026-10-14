@@ -1,4 +1,4 @@
-"""Streamlit recipe: live table viewer with auto-refresh against CUBRID."""
+"""Streamlit recipe: table viewer against CUBRID, refreshed by a Refresh button."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "cubrid+pycubrid://dba@localhost:33000/testdb")
-PRODUCTS_TABLE = "cookbook_products"
-SALES_TABLE = "cookbook_sales"
+PRODUCTS_TABLE = "cookbook_dashboard_products"
+SALES_TABLE = "cookbook_dashboard_sales"
 
 
 @st.cache_resource

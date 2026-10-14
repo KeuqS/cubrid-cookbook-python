@@ -1,3 +1,9 @@
+<!-- CUBRID-LAB-ICON:START -->
+<p align="center">
+  <a href="https://github.com/cubrid-lab/brand"><img src="https://raw.githubusercontent.com/cubrid-lab/brand/94e2bf6b915d7ef6a1111e06376f693f70bf6c4e/dist/icons/cubrid-cookbook-python.svg" alt="cubrid-cookbook-python icon (CUBRID Lab brand repository)" width="120"></a>
+</p>
+<!-- CUBRID-LAB-ICON:END -->
+
 # CUBRID Python Cookbook
 
 **Production-ready Python examples for CUBRID** — from first connection to production API, with migration guides, performance patterns, and common pitfalls.
@@ -11,7 +17,9 @@
 
 ---
 
-<img src="docs/demo-agent-state.gif" alt="AI agent state management demo" width="100%"/>
+<a href="docs/demo-agent-state.gif"><img src="docs/demo-agent-state.png" alt="AI agent state management demo, last frame of the recording" width="100%"/></a>
+
+<sub>▶ [Play the recording](docs/demo-agent-state.gif) (animated GIF, 9 seconds). The images on this page are still frames of real recordings of the examples against CUBRID; select one to play it. How they were made: [`demos/`](demos/README.md).</sub>
 
 ## Get Started
 
@@ -42,6 +50,10 @@ The host-run API connects to `localhost` by default (`CUBRID_HOST` overrides it)
 To run both the API and database in Docker instead, use `docker compose up -d --build`
 in that directory; Compose sets `CUBRID_HOST=cubrid` for the API.
 
+<a href="docs/demo-fastapi.gif"><img src="docs/demo-fastapi.png" alt="FastAPI quickstart: GET /items in Swagger UI returning the item created with POST /items against CUBRID, last frame of the recording" width="100%"/></a>
+
+<sub>▶ [Play the recording](docs/demo-fastapi.gif) (animated GIF, 12 seconds)</sub>
+
 ### Migration Guide
 
 Side-by-side Java JDBC → Python migration with real code comparisons. Covers connections, CRUD (DB-API and ORM), transactions, and batch operations.
@@ -61,6 +73,10 @@ Copy-and-customize starting points for real applications:
 | [`batch-etl/`](templates/batch-etl/) | Data pipeline with Pandas |
 | [`ai-agent/`](templates/ai-agent/) | AI agent state store + MCP toolchain + RAG metadata (5 live-tested scripts) |
 | [`dashboard/`](templates/dashboard/) | Interactive dashboard with Streamlit |
+
+<a href="docs/demo-dashboard.gif"><img src="docs/demo-dashboard.png" alt="Streamlit dashboard template showing CUBRID rows after docker compose up, last frame of the recording" width="100%"/></a>
+
+<sub>▶ [Play the recording](docs/demo-dashboard.gif) (animated GIF, 12 seconds)</sub>
 
 ### Performance
 

@@ -10,6 +10,7 @@ Demonstrates:
 from __future__ import annotations
 
 import pycubrid
+from pycubrid.connection import Connection
 from pycubrid.lob import Lob
 
 DB_CONFIG = {
@@ -21,23 +22,23 @@ DB_CONFIG = {
 }
 
 
-def get_connection() -> pycubrid.Connection:
+def get_connection() -> Connection:
     return pycubrid.connect(**DB_CONFIG)
 
 
-def setup(conn: pycubrid.Connection) -> None:
+def setup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_documents")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_lob_documents")
     cursor.execute("""
-        CREATE TABLE cookbook_documents (
+        CREATE TABLE cookbook_lob_documents (
             id      INT AUTO_INCREMENT PRIMARY KEY,
             title   VARCHAR(200) NOT NULL,
             content CLOB
         )
     """)
-    cursor.execute("DROP TABLE IF EXISTS cookbook_files")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_lob_files")
     cursor.execute("""
-        CREATE TABLE cookbook_files (
+        CREATE TABLE cookbook_lob_files (
             id       INT AUTO_INCREMENT PRIMARY KEY,
             filename VARCHAR(200) NOT NULL,
             file_data BLOB
@@ -47,7 +48,7 @@ def setup(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def read_lob(conn: pycubrid.Connection, lob_dict: dict) -> bytes:
+def read_lob(conn: Connection, lob_dict: dict) -> bytes:
     """Read LOB content from a LOB result dictionary.
 
     When selecting LOB columns, pycubrid returns a dict with keys:
@@ -58,7 +59,7 @@ def read_lob(conn: pycubrid.Connection, lob_dict: dict) -> bytes:
     return lob.read(lob_dict["lob_length"])
 
 
-def clob_example(conn: pycubrid.Connection) -> None:
+def clob_example(conn: Connection) -> None:
     """Store and retrieve text data using CLOB."""
     print("=== CLOB (Character Large Object) ===")
     cursor = conn.cursor()
@@ -78,14 +79,14 @@ def clob_example(conn: pycubrid.Connection) -> None:
 
     for title, content in documents:
         cursor.execute(
-            "INSERT INTO cookbook_documents (title, content) VALUES (?, ?)",
+            "INSERT INTO cookbook_lob_documents (title, content) VALUES (?, ?)",
             (title, content),
         )
     conn.commit()
     print(f"  ✓ Inserted {len(documents)} documents with CLOB data")
 
     # Read back — CLOB columns return a dict with LOB metadata
-    cursor.execute("SELECT title, content FROM cookbook_documents ORDER BY id")
+    cursor.execute("SELECT title, content FROM cookbook_lob_documents ORDER BY id")
     for row in cursor.fetchall():
         title = row[0]
         clob_dict = row[1]
@@ -99,7 +100,7 @@ def clob_example(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def blob_example(conn: pycubrid.Connection) -> None:
+def blob_example(conn: Connection) -> None:
     """Store and retrieve binary data using BLOB."""
     print("\n=== BLOB (Binary Large Object) ===")
     cursor = conn.cursor()
@@ -114,19 +115,19 @@ def blob_example(conn: pycubrid.Connection) -> None:
     for filename, file_data in files:
         if file_data:
             cursor.execute(
-                "INSERT INTO cookbook_files (filename, file_data) VALUES (?, ?)",
+                "INSERT INTO cookbook_lob_files (filename, file_data) VALUES (?, ?)",
                 (filename, file_data),
             )
         else:
             cursor.execute(
-                "INSERT INTO cookbook_files (filename, file_data) VALUES (?, NULL)",
+                "INSERT INTO cookbook_lob_files (filename, file_data) VALUES (?, NULL)",
                 (filename,),
             )
     conn.commit()
     print(f"  ✓ Inserted {len(files)} files with BLOB data")
 
     # Read back — BLOB columns return a dict with LOB metadata
-    cursor.execute("SELECT filename, file_data FROM cookbook_files ORDER BY id")
+    cursor.execute("SELECT filename, file_data FROM cookbook_lob_files ORDER BY id")
     for row in cursor.fetchall():
         filename = row[0]
         blob_dict = row[1]
@@ -139,10 +140,10 @@ def blob_example(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def cleanup(conn: pycubrid.Connection) -> None:
+def cleanup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_documents")
-    cursor.execute("DROP TABLE IF EXISTS cookbook_files")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_lob_documents")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_lob_files")
     conn.commit()
     cursor.close()
     print("\n✓ Cleaned up")

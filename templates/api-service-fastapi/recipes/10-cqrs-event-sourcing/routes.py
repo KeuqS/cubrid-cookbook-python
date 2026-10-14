@@ -109,8 +109,20 @@ def _rehydrate_account(db: Session, account_id: str) -> tuple[dict[str, object] 
 
 
 def _project_read_model(
-    db: Session, account_id: str, state: dict[str, object], sequence_no: int
+    db: Session,
+    account_id: str,
+    state: dict[str, object],
+    sequence_no: int,
+    *,
+    replace: bool = False,
 ) -> AccountReadModel:
+    """Write ``state`` to the read model.
+
+    An event projection skips a state the read model already reached. A rebuild
+    passes ``replace=True`` so the replayed state overwrites the row at the same
+    sequence number, which is what repairs a drifted read model. A state older than
+    the row is never written: that raises 409.
+    """
     read_model = db.scalar(
         select(AccountReadModel).where(AccountReadModel.account_id == account_id)
     )
@@ -124,15 +136,18 @@ def _project_read_model(
         )
         db.add(read_model)
     else:
-        if sequence_no <= read_model.last_sequence_no:
+        if not replace and sequence_no <= read_model.last_sequence_no:
             return read_model
-        # Conditional UPDATE with version guard for optimistic concurrency
+        # Conditional UPDATE with version guard for optimistic concurrency. The
+        # sequence guard also stops a rebuild from rewinding the row to an older
+        # state when a command committed a newer event after the rebuild's replay.
         original_version = read_model.version
         result = db.execute(
             update(AccountReadModel)
             .where(
                 AccountReadModel.id == read_model.id,
                 AccountReadModel.version == original_version,
+                AccountReadModel.last_sequence_no <= sequence_no,
             )
             .values(
                 owner_name=str(state.get("owner_name", read_model.owner_name)),
@@ -402,7 +417,7 @@ def rebuild_account(
         if state is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
 
-    read_model = _project_read_model(db, account_id, state, tail)
+    read_model = _project_read_model(db, account_id, state, tail, replace=True)
     try:
         db.commit()
     except IntegrityError as exc:

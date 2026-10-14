@@ -2,10 +2,16 @@
 
 Demonstrates how CUBRID serves as the backbone for an agentic workflow:
 1. Agent receives a user query
-2. Plans tool calls (recorded in agent_tool_calls)
-3. Executes against CUBRID via the MCP read-only whitelist
+2. Plans tool calls (recorded in cookbook_agent_tool_calls)
+3. Executes the planned tool directly with pycubrid; the tool names mirror
+   cubrid-mcp-server's, but no MCP server or read-only whitelist is involved
+   (02_mcp_toolchain.py is the example that goes through the MCP server)
+   Warning: execute_query runs whatever SQL it is given, and the default
+   connection is the dba user, so once an LLM writes the SQL it can modify
+   or drop data. Validate it as read-only (or route it through the MCP
+   server, as 02 does) and connect as a least-privilege user first.
 4. Observes results and decides next action
-5. Synthesizes a response (all turns stored in agent_messages)
+5. Synthesizes a response (all turns stored in cookbook_agent_messages)
 """
 
 from __future__ import annotations
@@ -23,6 +29,10 @@ from importlib.util import spec_from_file_location, module_from_spec
 _spec = spec_from_file_location("agent_state", Path(__file__).with_name("01_agent_state.py"))
 _agent_state = module_from_spec(_spec)
 _spec.loader.exec_module(_agent_state)
+
+
+# Recipe-owned session key: a rerun deletes only this session.
+DEMO_SESSION_KEY = "cookbook-agent-loop-demo"
 
 
 class SimpleDataAgent:
@@ -134,7 +144,9 @@ def main() -> None:
             )
         conn.commit()
 
-        agent = SimpleDataAgent(conn, "agent-loop-demo")
+        # Rerunnable: drop the previous run's demo session before creating it again.
+        _agent_state.delete_session(conn, DEMO_SESSION_KEY)
+        agent = SimpleDataAgent(conn, DEMO_SESSION_KEY)
 
         # Agent loop: multiple queries
         print("Agent loop demo")
@@ -162,7 +174,7 @@ def main() -> None:
         # Show tool call history with timing
         cur = conn.cursor()
         cur.execute(
-            "SELECT tool_name, status, duration_ms FROM agent_tool_calls "
+            "SELECT tool_name, status, duration_ms FROM cookbook_agent_tool_calls "
             "WHERE session_id = ? ORDER BY id",
             [agent.session_id],
         )

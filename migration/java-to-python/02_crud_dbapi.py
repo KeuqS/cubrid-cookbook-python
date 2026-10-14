@@ -6,7 +6,7 @@ Each function shows the Java equivalent in its docstring.
 Java JDBC pattern (what you're replacing):
 ──────────────────────────────────────────
     PreparedStatement ps = conn.prepareStatement(
-        "INSERT INTO cookbook_items (val, cnt) VALUES (?, ?)"
+        "INSERT INTO cookbook_jdbc_items (val, cnt) VALUES (?, ?)"
     );
     ps.setString(1, "widget");
     ps.setInt(2, 10);
@@ -17,7 +17,7 @@ Java JDBC pattern (what you're replacing):
 Python pycubrid (what you'll write):
 ─────────────────────────────────────
     cursor.execute(
-        "INSERT INTO cookbook_items (val, cnt) VALUES (?, ?)",
+        "INSERT INTO cookbook_jdbc_items (val, cnt) VALUES (?, ?)",
         ("widget", 10),
     )
     conn.commit()
@@ -28,6 +28,7 @@ Same parameter marker (?), same SQL, 60% less boilerplate.
 from __future__ import annotations
 
 import pycubrid
+from pycubrid.connection import Connection
 
 DB_CONFIG = {
     "host": "localhost",
@@ -38,21 +39,21 @@ DB_CONFIG = {
 }
 
 
-def get_connection() -> pycubrid.Connection:
+def get_connection() -> Connection:
     return pycubrid.connect(**DB_CONFIG)
 
 
-def setup_table(conn: pycubrid.Connection) -> None:
+def setup_table(conn: Connection) -> None:
     """CREATE TABLE — identical SQL in both languages.
 
     Java:
-        stmt.executeUpdate("CREATE TABLE cookbook_items (...)");
+        stmt.executeUpdate("CREATE TABLE cookbook_jdbc_items (...)");
         conn.commit();
     """
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_items")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_jdbc_items")
     cursor.execute("""
-        CREATE TABLE cookbook_items (
+        CREATE TABLE cookbook_jdbc_items (
             id   INT AUTO_INCREMENT PRIMARY KEY,
             val  VARCHAR(200) NOT NULL,
             cnt  INT DEFAULT 0,
@@ -61,15 +62,15 @@ def setup_table(conn: pycubrid.Connection) -> None:
     """)
     conn.commit()
     cursor.close()
-    print("Created table 'cookbook_items'")
+    print("Created table 'cookbook_jdbc_items'")
 
 
-def insert_single(conn: pycubrid.Connection) -> None:
+def insert_single(conn: Connection) -> None:
     """INSERT one row with parameters.
 
     Java (PreparedStatement):
         PreparedStatement ps = conn.prepareStatement(
-            "INSERT INTO cookbook_items (val, cnt, price) VALUES (?, ?, ?)"
+            "INSERT INTO cookbook_jdbc_items (val, cnt, price) VALUES (?, ?, ?)"
         );
         ps.setString(1, "Widget A");
         ps.setInt(2, 10);
@@ -82,7 +83,7 @@ def insert_single(conn: pycubrid.Connection) -> None:
     """
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO cookbook_items (val, cnt, price) VALUES (?, ?, ?)",
+        "INSERT INTO cookbook_jdbc_items (val, cnt, price) VALUES (?, ?, ?)",
         ("Widget A", 10, 29.99),
     )
     conn.commit()
@@ -90,7 +91,7 @@ def insert_single(conn: pycubrid.Connection) -> None:
     print("Inserted 1 row")
 
 
-def insert_multiple(conn: pycubrid.Connection) -> None:
+def insert_multiple(conn: Connection) -> None:
     """INSERT multiple rows.
 
     Java:
@@ -112,7 +113,7 @@ def insert_multiple(conn: pycubrid.Connection) -> None:
     ]
     cursor = conn.cursor()
     cursor.executemany(
-        "INSERT INTO cookbook_items (val, cnt, price) VALUES (?, ?, ?)",
+        "INSERT INTO cookbook_jdbc_items (val, cnt, price) VALUES (?, ?, ?)",
         items,
     )
     conn.commit()
@@ -120,7 +121,7 @@ def insert_multiple(conn: pycubrid.Connection) -> None:
     print(f"Inserted {len(items)} rows")
 
 
-def select_all(conn: pycubrid.Connection) -> list[tuple]:
+def select_all(conn: Connection) -> list[tuple]:
     """SELECT all rows.
 
     Java (ResultSet iteration):
@@ -136,7 +137,7 @@ def select_all(conn: pycubrid.Connection) -> list[tuple]:
     Python — fetchall() returns a list of tuples, no getInt/getString:
     """
     cursor = conn.cursor()
-    cursor.execute("SELECT id, val, cnt, price FROM cookbook_items ORDER BY id")
+    cursor.execute("SELECT id, val, cnt, price FROM cookbook_jdbc_items ORDER BY id")
     rows = cursor.fetchall()
 
     print(f"\nAll items ({len(rows)} rows):")
@@ -148,12 +149,12 @@ def select_all(conn: pycubrid.Connection) -> list[tuple]:
     return rows
 
 
-def select_filtered(conn: pycubrid.Connection) -> None:
+def select_filtered(conn: Connection) -> None:
     """SELECT with WHERE and parameters.
 
     Java:
         PreparedStatement ps = conn.prepareStatement(
-            "SELECT val, price FROM cookbook_items WHERE price > ? ORDER BY price DESC"
+            "SELECT val, price FROM cookbook_jdbc_items WHERE price > ? ORDER BY price DESC"
         );
         ps.setDouble(1, 20.0);
         ResultSet rs = ps.executeQuery();
@@ -164,7 +165,7 @@ def select_filtered(conn: pycubrid.Connection) -> None:
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT val, price FROM cookbook_items WHERE price > ? ORDER BY price DESC",
+        "SELECT val, price FROM cookbook_jdbc_items WHERE price > ? ORDER BY price DESC",
         (20.0,),
     )
     rows = cursor.fetchall()
@@ -176,7 +177,7 @@ def select_filtered(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def select_fetchone(conn: pycubrid.Connection) -> None:
+def select_fetchone(conn: Connection) -> None:
     """Fetch one row at a time (replaces rs.next() pattern).
 
     Java:
@@ -186,7 +187,7 @@ def select_fetchone(conn: pycubrid.Connection) -> None:
     Python — fetchone() returns tuple or None:
     """
     cursor = conn.cursor()
-    cursor.execute("SELECT val, cnt FROM cookbook_items ORDER BY id")
+    cursor.execute("SELECT val, cnt FROM cookbook_jdbc_items ORDER BY id")
 
     first = cursor.fetchone()
     print(f"\nFirst item: {first[0]} (count={first[1]})")
@@ -197,12 +198,12 @@ def select_fetchone(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def update_rows(conn: pycubrid.Connection) -> None:
+def update_rows(conn: Connection) -> None:
     """UPDATE rows.
 
     Java:
         PreparedStatement ps = conn.prepareStatement(
-            "UPDATE cookbook_items SET price = ? WHERE val = ?"
+            "UPDATE cookbook_jdbc_items SET price = ? WHERE val = ?"
         );
         ps.setDouble(1, 24.99);
         ps.setString(2, "Widget A");
@@ -214,13 +215,13 @@ def update_rows(conn: pycubrid.Connection) -> None:
     cursor = conn.cursor()
 
     cursor.execute(
-        "UPDATE cookbook_items SET price = ? WHERE val = ?",
+        "UPDATE cookbook_jdbc_items SET price = ? WHERE val = ?",
         (24.99, "Widget A"),
     )
     print(f"\nUpdated Widget A price (rows affected: {cursor.rowcount})")
 
     cursor.execute(
-        "UPDATE cookbook_items SET cnt = cnt + ? WHERE price < ?",
+        "UPDATE cookbook_jdbc_items SET cnt = cnt + ? WHERE price < ?",
         (10, 10.0),
     )
     print(f"Restocked cheap items (rows affected: {cursor.rowcount})")
@@ -229,12 +230,12 @@ def update_rows(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def delete_rows(conn: pycubrid.Connection) -> None:
+def delete_rows(conn: Connection) -> None:
     """DELETE rows.
 
     Java:
         PreparedStatement ps = conn.prepareStatement(
-            "DELETE FROM cookbook_items WHERE val = ?"
+            "DELETE FROM cookbook_jdbc_items WHERE val = ?"
         );
         ps.setString(1, "Tool E");
         int affected = ps.executeUpdate();
@@ -242,14 +243,14 @@ def delete_rows(conn: pycubrid.Connection) -> None:
     """
     cursor = conn.cursor()
 
-    cursor.execute("DELETE FROM cookbook_items WHERE val = ?", ("Tool E",))
+    cursor.execute("DELETE FROM cookbook_jdbc_items WHERE val = ?", ("Tool E",))
     print(f"\nDeleted Tool E (rows affected: {cursor.rowcount})")
 
     conn.commit()
     cursor.close()
 
 
-def handle_nulls(conn: pycubrid.Connection) -> None:
+def handle_nulls(conn: Connection) -> None:
     """NULL handling — much simpler in Python.
 
     Java (the wasNull pattern):
@@ -262,13 +263,13 @@ def handle_nulls(conn: pycubrid.Connection) -> None:
     """
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO cookbook_items (val, cnt, price) VALUES (?, NULL, NULL)",
+        "INSERT INTO cookbook_jdbc_items (val, cnt, price) VALUES (?, NULL, NULL)",
         ("NullTest",),
     )
     conn.commit()
 
     cursor.execute(
-        "SELECT val, cnt, price FROM cookbook_items WHERE val = ?",
+        "SELECT val, cnt, price FROM cookbook_jdbc_items WHERE val = ?",
         ("NullTest",),
     )
     row = cursor.fetchone()
@@ -277,12 +278,12 @@ def handle_nulls(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def cleanup(conn: pycubrid.Connection) -> None:
+def cleanup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_items")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_jdbc_items")
     conn.commit()
     cursor.close()
-    print("\nCleaned up table 'cookbook_items'")
+    print("\nCleaned up table 'cookbook_jdbc_items'")
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ All recipes use:
 
 ## Recipes
 
-1. `01_table_viewer.py` - Live query display with `st.dataframe` and auto-refresh
+1. `01_table_viewer.py` - Query display with `st.dataframe`, re-read when you click Refresh (no auto-refresh)
 2. `02_filters.py` - Sidebar category and price filters with dynamic `WHERE` clauses
 3. `03_kpis.py` - KPI cards with `st.metric` using `COUNT`, `SUM`, and `AVG`
 4. `04_charts.py` - Grouped bar and line charts using native Streamlit chart APIs

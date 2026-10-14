@@ -15,7 +15,7 @@
 
 ## 레시피
 
-1. `01_table_viewer.py` — `st.dataframe`과 자동 갱신으로 쿼리 결과를 실시간 표시
+1. `01_table_viewer.py` — `st.dataframe`으로 쿼리 결과를 표시하고, Refresh 버튼을 누를 때 다시 조회 (자동 갱신 없음)
 2. `02_filters.py` — 사이드바에서 카테고리·가격 필터, 동적 `WHERE` 절
 3. `03_kpis.py` — `COUNT`, `SUM`, `AVG`로 `st.metric` KPI 카드
 4. `04_charts.py` — Streamlit 기본 차트 API로 그룹 막대·선 그래프

@@ -8,7 +8,7 @@ Direct database access using the [pycubrid](https://github.com/cubrid-lab/pycubr
 - `qmark` parameter style — uses `?` placeholders for safe, parameterized queries
 - Full CRUD with `cursor.execute()` and `cursor.executemany()` for batch operations
 - Transaction control — `commit()`, `rollback()`, savepoints, and `autocommit` mode
-- Large Object support — `CLOB` and `BLOB` via `conn.create_lob()`
+- Large Object support — insert `str`/`bytes` into `CLOB`/`BLOB` columns, read them back with `pycubrid.lob.Lob`
 - PEP 249 exception hierarchy — `DatabaseError`, `IntegrityError`, `OperationalError`, etc.
 
 ## Prerequisites
@@ -47,7 +47,7 @@ constrains installation to its selected published driver version.
 | `03_transactions.py` | Transaction control | `commit()`, `rollback()`, savepoints, `autocommit` |
 | `04_prepared.py` | Parameterized queries | `qmark` style, SQL injection safety, batch inserts |
 | `05_error_handling.py` | Exception handling | PEP 249 exception hierarchy, error recovery |
-| `06_lob.py` | Large objects | CLOB/BLOB, `create_lob()`, reading LOB data back |
+| `06_lob.py` | Large objects | CLOB/BLOB, inserting `str`/`bytes`, reading LOB data back with `Lob` |
 | `07_merge_upsert.py` | Idempotent sync with MERGE | `MERGE INTO ... USING`, staging tables, deactivate missing rows |
 | `08_hierarchy_connect_by.py` | Tree traversal | `CONNECT BY PRIOR`, `START WITH`, `LEVEL`, org charts |
 | `09_serial_order_numbers.py` | Business IDs with SERIAL | `CREATE SERIAL`, `NEXT_VALUE`, sequential order numbers |
@@ -60,8 +60,8 @@ constrains installation to its selected published driver version.
 | `16_batch_error_handling.py` | All-or-nothing batch recovery | ``executemany_batch`` error paths, `rollback()` for all-or-nothing semantics |
 | `17_window_functions.py` | Analytic (window) functions | `ROW_NUMBER`/`RANK`/`DENSE_RANK`, `LAG`, running `SUM` `OVER (PARTITION BY ... ORDER BY ...)` |
 | `18_recursive_cte.py` | Recursive CTEs | `WITH RECURSIVE`, number series, hierarchy path building (contrast with 08 CONNECT BY) |
-| `19_pagination.py` | Server-side pagination | `LIMIT`/`OFFSET` vs CUBRID `FOR ORDERBY_NUM() BETWEEN`, `ROWNUM` caveat |
-| `20_timezone_datetime.py` | Timezone-aware datetimes | `DATETIMETZ`/`DATETIMELTZ`, `SET TIME ZONE`, `TO_CHAR(... TZR)` |
+| `19_pagination.py` | Server-side pagination | `LIMIT`/`OFFSET` vs CUBRID `FOR ORDERBY_NUM() BETWEEN`, `ROWNUM` caveat (docstring note) |
+| `20_timezone_datetime.py` | Timezone-aware datetimes | `DATETIMETZ`/`DATETIMELTZ`/`TIMESTAMPTZ` native reads, `SET TIME ZONE`, `TO_CHAR(... TZR)` |
 | `21_enum_type.py` | The ENUM column type | declaration-order sorting, `col + 0` ordinal, out-of-set rejection |
 | `22_date_formatting.py` | Date formatting & parsing | `TO_CHAR(date/number, fmt)`, `TO_DATE(str, fmt)`, fixed-width padding |
 
@@ -104,20 +104,20 @@ conn.close()
 ```python
 # INSERT — qmark style (? placeholders)
 cursor.execute(
-    "INSERT INTO cookbook_users (name, email, age) VALUES (?, ?, ?)",
+    "INSERT INTO cookbook_crud_users (name, email, age) VALUES (?, ?, ?)",
     ("Alice", "alice@example.com", 30),
 )
 
 # Batch INSERT with executemany()
 users = [("Bob", "bob@example.com", 25), ("Charlie", "charlie@example.com", 35)]
 cursor.executemany(
-    "INSERT INTO cookbook_users (name, email, age) VALUES (?, ?, ?)",
+    "INSERT INTO cookbook_crud_users (name, email, age) VALUES (?, ?, ?)",
     users,
 )
 conn.commit()
 
 # SELECT with filtering
-cursor.execute("SELECT name, age FROM cookbook_users WHERE age >= ?", (30,))
+cursor.execute("SELECT name, age FROM cookbook_crud_users WHERE age >= ?", (30,))
 for row in cursor.fetchall():
     print(f"  {row[0]}: age {row[1]}")
 ```
@@ -125,21 +125,34 @@ for row in cursor.fetchall():
 ### Large Objects (CLOB/BLOB)
 
 ```python
-# Store text as CLOB
-lob = conn.create_lob("CLOB", "# README\n\nLarge document content here...")
-cursor.execute(
-    "INSERT INTO cookbook_documents (title, content) VALUES (?, ?)",
-    ("README", lob),
-)
+from pycubrid.lob import Lob
 
-# Store binary data as BLOB
-blob = conn.create_lob("BLOB", b"\x89PNG\r\n...")
+# Store text in a CLOB column and bytes in a BLOB column: bind them directly
 cursor.execute(
-    "INSERT INTO cookbook_files (filename, data) VALUES (?, ?)",
-    ("image.png", blob),
+    "INSERT INTO cookbook_lob_documents (title, content) VALUES (?, ?)",
+    ("README", "# README\n\nLarge document content here..."),
+)
+cursor.execute(
+    "INSERT INTO cookbook_lob_files (filename, file_data) VALUES (?, ?)",
+    ("image.png", b"\x89PNG\r\n..."),
 )
 conn.commit()
+
+# A LOB column reads back as a dict; rebuild the Lob handle to read its bytes
+cursor.execute("SELECT content FROM cookbook_lob_documents WHERE title = ?", ("README",))
+clob = cursor.fetchone()[0]
+text = Lob(conn, clob["lob_type"], clob["packed_lob_handle"]).read(clob["lob_length"])
+print(text.decode("utf-8"))
 ```
+
+`conn.create_lob(lob_type)` takes only a type code (`CUBRIDDataType.CLOB` or
+`CUBRIDDataType.BLOB` from `pycubrid.constants`) and returns an empty server-side
+`Lob` to `write()` to. `execute()` and the default `executemany()` cannot bind
+that handle as a `?` parameter (they raise `ProgrammingError: unsupported
+parameter type`), so these recipes insert `str`/`bytes` directly. The one
+exception, since pycubrid 1.12.0, is `executemany(..., prepared=True)` on the sync
+cursor with autocommit off, which binds a `Lob` of the same connection by its
+handle.
 
 ## Expected Output
 
@@ -150,22 +163,27 @@ Running `01_connect.py`:
 1 + 1 = 2
 
 === Connection Info ===
-CUBRID version: 11.2.0.0338
+CUBRID version: <server version>
 Database: testdb
-User: DBA
+User: DBA@<hostname>
 
 === Cursor Description ===
 Columns:
   id          type_code=8
-  name        type_code=2
-  value       type_code=6
+  name        type_code=1
+  val         type_code=12
 Row: (1, 'hello', 3.14)
+
+=== Multiple Queries ===
+SELECT 1 AS a                            → 1
+SELECT 'hello' AS b                      → hello
+SELECT CURRENT_DATE AS today             → <today's date>
 ```
 
 Running `02_crud.py`:
 
 ```
-✓ Created table 'cookbook_users'
+✓ Created table 'cookbook_crud_users'
 ✓ Inserted 5 rows
 
 All users (5 rows):
@@ -184,7 +202,7 @@ All users (5 rows):
 | `conn.cursor()` | Create a cursor |
 | `conn.commit()` / `conn.rollback()` | Transaction control |
 | `conn.close()` | Close the connection |
-| `conn.create_lob(lob_type, data)` | Create CLOB or BLOB object |
+| `conn.create_lob(lob_type)` | Create an empty server-side CLOB or BLOB `Lob` (type code only) |
 | `conn.autocommit` | Get/set autocommit mode |
 | `cursor.execute(sql, params)` | Execute a single query |
 | `cursor.executemany(sql, seq_of_params)` | Execute batch query |

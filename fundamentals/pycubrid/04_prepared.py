@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 
 import pycubrid
+from pycubrid.connection import Connection
 
 DB_CONFIG = {
     "host": "localhost",
@@ -22,15 +23,15 @@ DB_CONFIG = {
 }
 
 
-def get_connection() -> pycubrid.Connection:
+def get_connection() -> Connection:
     return pycubrid.connect(**DB_CONFIG)
 
 
-def setup(conn: pycubrid.Connection) -> None:
+def setup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_products")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_prepared_products")
     cursor.execute("""
-        CREATE TABLE cookbook_products (
+        CREATE TABLE cookbook_prepared_products (
             id       INT AUTO_INCREMENT PRIMARY KEY,
             name     VARCHAR(200) NOT NULL,
             category VARCHAR(100),
@@ -42,22 +43,22 @@ def setup(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def parameterized_queries(conn: pycubrid.Connection) -> None:
+def parameterized_queries(conn: Connection) -> None:
     """Use ? placeholders for safe parameterized queries."""
     print("=== Parameterized Queries ===")
     cursor = conn.cursor()
 
     # pycubrid uses qmark paramstyle: ?
     cursor.execute(
-        "INSERT INTO cookbook_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
+        "INSERT INTO cookbook_prepared_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
         ("Laptop", "Electronics", 999.99, 50),
     )
     cursor.execute(
-        "INSERT INTO cookbook_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
+        "INSERT INTO cookbook_prepared_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
         ("Mouse", "Electronics", 29.99, 200),
     )
     cursor.execute(
-        "INSERT INTO cookbook_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
+        "INSERT INTO cookbook_prepared_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
         ("Desk Chair", "Furniture", 399.00, 30),
     )
     conn.commit()
@@ -65,7 +66,7 @@ def parameterized_queries(conn: pycubrid.Connection) -> None:
 
     # SELECT with parameters
     cursor.execute(
-        "SELECT name, price FROM cookbook_products WHERE category = ? AND price > ?",
+        "SELECT name, price FROM cookbook_prepared_products WHERE category = ? AND price > ?",
         ("Electronics", 50.0),
     )
     rows = cursor.fetchall()
@@ -74,33 +75,33 @@ def parameterized_queries(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def sql_injection_safe(conn: pycubrid.Connection) -> None:
+def sql_injection_safe(conn: Connection) -> None:
     """Demonstrate SQL injection safety with parameterized queries."""
     print("\n=== SQL Injection Safety ===")
     cursor = conn.cursor()
 
     # DANGEROUS (never do this!):
-    # user_input = "'; DROP TABLE cookbook_products; --"
-    # cursor.execute(f"SELECT * FROM cookbook_products WHERE name = '{user_input}'")
+    # user_input = "'; DROP TABLE cookbook_prepared_products; --"
+    # cursor.execute(f"SELECT * FROM cookbook_prepared_products WHERE name = '{user_input}'")
 
     # SAFE — parameters are escaped automatically:
-    malicious_input = "'; DROP TABLE cookbook_products; --"
+    malicious_input = "'; DROP TABLE cookbook_prepared_products; --"
     cursor.execute(
-        "SELECT name, price FROM cookbook_products WHERE name = ?",
+        "SELECT name, price FROM cookbook_prepared_products WHERE name = ?",
         (malicious_input,),
     )
     rows = cursor.fetchall()
     print(f"  Malicious input returned {len(rows)} rows (table is safe!)")
 
     # Verify table still exists
-    cursor.execute("SELECT COUNT(*) FROM cookbook_products")
+    cursor.execute("SELECT COUNT(*) FROM cookbook_prepared_products")
     count = cursor.fetchone()[0]
     print(f"  ✓ Table still has {count} rows — SQL injection prevented")
 
     cursor.close()
 
 
-def batch_insert(conn: pycubrid.Connection) -> None:
+def batch_insert(conn: Connection) -> None:
     """executemany — efficient batch inserts."""
     print("\n=== Batch Insert (executemany) ===")
     cursor = conn.cursor()
@@ -118,7 +119,7 @@ def batch_insert(conn: pycubrid.Connection) -> None:
 
     start = time.perf_counter()
     cursor.executemany(
-        "INSERT INTO cookbook_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
+        "INSERT INTO cookbook_prepared_products (name, category, price, stock) VALUES (?, ?, ?, ?)",
         products,
     )
     conn.commit()
@@ -127,14 +128,14 @@ def batch_insert(conn: pycubrid.Connection) -> None:
     print(f"  ✓ Inserted {len(products)} products in {elapsed * 1000:.1f}ms")
 
     # Verify
-    cursor.execute("SELECT COUNT(*) FROM cookbook_products")
+    cursor.execute("SELECT COUNT(*) FROM cookbook_prepared_products")
     total = cursor.fetchone()[0]
     print(f"  Total products: {total}")
 
     cursor.close()
 
 
-def batch_update(conn: pycubrid.Connection) -> None:
+def batch_update(conn: Connection) -> None:
     """Batch updates with executemany."""
     print("\n=== Batch Update ===")
     cursor = conn.cursor()
@@ -147,7 +148,7 @@ def batch_update(conn: pycubrid.Connection) -> None:
     ]
 
     cursor.executemany(
-        "UPDATE cookbook_products SET price = price * ? WHERE name = ?",
+        "UPDATE cookbook_prepared_products SET price = price * ? WHERE name = ?",
         updates,
     )
     conn.commit()
@@ -155,7 +156,7 @@ def batch_update(conn: pycubrid.Connection) -> None:
 
     # Show discounted prices
     cursor.execute(
-        "SELECT name, price FROM cookbook_products WHERE name IN ('Laptop', 'Monitor', 'Standing Desk')"
+        "SELECT name, price FROM cookbook_prepared_products WHERE name IN ('Laptop', 'Monitor', 'Standing Desk')"
     )
     for row in cursor.fetchall():
         print(f"  {row[0]:15s} → ${row[1]:.2f}")
@@ -163,7 +164,7 @@ def batch_update(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def aggregate_queries(conn: pycubrid.Connection) -> None:
+def aggregate_queries(conn: Connection) -> None:
     """Aggregation with GROUP BY."""
     print("\n=== Aggregate Queries ===")
     cursor = conn.cursor()
@@ -173,7 +174,7 @@ def aggregate_queries(conn: pycubrid.Connection) -> None:
                COUNT(*) AS cnt,
                CAST(AVG(price) AS DOUBLE) AS avg_price,
                CAST(SUM(stock) AS INT) AS total_stock
-        FROM cookbook_products
+        FROM cookbook_prepared_products
         GROUP BY category
         ORDER BY cnt DESC
     """)
@@ -186,9 +187,9 @@ def aggregate_queries(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def cleanup(conn: pycubrid.Connection) -> None:
+def cleanup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_products")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_prepared_products")
     conn.commit()
     cursor.close()
     print("\n✓ Cleaned up")

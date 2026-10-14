@@ -40,6 +40,7 @@ the explicit conn.setAutoCommit(false) you'd write in Java.
 from __future__ import annotations
 
 import pycubrid
+from pycubrid.connection import Connection
 
 DB_CONFIG = {
     "host": "localhost",
@@ -50,38 +51,38 @@ DB_CONFIG = {
 }
 
 
-def get_connection() -> pycubrid.Connection:
+def get_connection() -> Connection:
     return pycubrid.connect(**DB_CONFIG)
 
 
-def setup(conn: pycubrid.Connection) -> None:
+def setup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_accounts")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_jdbc_accounts")
     cursor.execute("""
-        CREATE TABLE cookbook_accounts (
+        CREATE TABLE cookbook_jdbc_accounts (
             id      INT AUTO_INCREMENT PRIMARY KEY,
             owner   VARCHAR(100) NOT NULL,
             balance DOUBLE DEFAULT 0.0
         )
     """)
-    cursor.execute("INSERT INTO cookbook_accounts (owner, balance) VALUES ('Alice', 1000.0)")
-    cursor.execute("INSERT INTO cookbook_accounts (owner, balance) VALUES ('Bob', 500.0)")
-    cursor.execute("INSERT INTO cookbook_accounts (owner, balance) VALUES ('Charlie', 750.0)")
+    cursor.execute("INSERT INTO cookbook_jdbc_accounts (owner, balance) VALUES ('Alice', 1000.0)")
+    cursor.execute("INSERT INTO cookbook_jdbc_accounts (owner, balance) VALUES ('Bob', 500.0)")
+    cursor.execute("INSERT INTO cookbook_jdbc_accounts (owner, balance) VALUES ('Charlie', 750.0)")
     conn.commit()
     cursor.close()
     print("Setup: 3 accounts created")
 
 
-def show_balances(conn: pycubrid.Connection, label: str = "") -> None:
+def show_balances(conn: Connection, label: str = "") -> None:
     cursor = conn.cursor()
-    cursor.execute("SELECT owner, balance FROM cookbook_accounts ORDER BY id")
+    cursor.execute("SELECT owner, balance FROM cookbook_jdbc_accounts ORDER BY id")
     rows = cursor.fetchall()
     tag = f" [{label}]" if label else ""
     print(f"  Balances{tag}: {', '.join(f'{r[0]}=${r[1]:.2f}' for r in rows)}")
     cursor.close()
 
 
-def commit_and_rollback(conn: pycubrid.Connection) -> None:
+def commit_and_rollback(conn: Connection) -> None:
     """Basic commit and rollback.
 
     Java equivalent:
@@ -100,11 +101,11 @@ def commit_and_rollback(conn: pycubrid.Connection) -> None:
 
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE cookbook_accounts SET balance = balance - ? WHERE owner = ?",
+        "UPDATE cookbook_jdbc_accounts SET balance = balance - ? WHERE owner = ?",
         (200.0, "Alice"),
     )
     cursor.execute(
-        "UPDATE cookbook_accounts SET balance = balance + ? WHERE owner = ?",
+        "UPDATE cookbook_jdbc_accounts SET balance = balance + ? WHERE owner = ?",
         (200.0, "Bob"),
     )
     conn.commit()
@@ -114,7 +115,7 @@ def commit_and_rollback(conn: pycubrid.Connection) -> None:
 
     print("\n=== Rollback ===")
     cursor = conn.cursor()
-    cursor.execute("UPDATE cookbook_accounts SET balance = 0 WHERE owner = 'Alice'")
+    cursor.execute("UPDATE cookbook_jdbc_accounts SET balance = 0 WHERE owner = 'Alice'")
     print("  Set Alice=0 (not committed)")
     conn.rollback()
     print("  Rolled back")
@@ -122,7 +123,7 @@ def commit_and_rollback(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def safe_transfer(conn: pycubrid.Connection, sender: str, receiver: str, amount: float) -> bool:
+def safe_transfer(conn: Connection, sender: str, receiver: str, amount: float) -> bool:
     """Transfer with proper error handling.
 
     Java equivalent (try/catch/finally):
@@ -132,7 +133,7 @@ def safe_transfer(conn: pycubrid.Connection, sender: str, receiver: str, amount:
             conn.setAutoCommit(false);
 
             PreparedStatement debit = conn.prepareStatement(
-                "UPDATE cookbook_accounts SET balance = balance - ? WHERE owner = ? AND balance >= ?"
+                "UPDATE cookbook_jdbc_accounts SET balance = balance - ? WHERE owner = ? AND balance >= ?"
             );
             debit.setDouble(1, amount);
             debit.setString(2, sender);
@@ -145,11 +146,14 @@ def safe_transfer(conn: pycubrid.Connection, sender: str, receiver: str, amount:
             }
 
             PreparedStatement credit = conn.prepareStatement(
-                "UPDATE cookbook_accounts SET balance = balance + ? WHERE owner = ?"
+                "UPDATE cookbook_jdbc_accounts SET balance = balance + ? WHERE owner = ?"
             );
             credit.setDouble(1, amount);
             credit.setString(2, receiver);
-            credit.executeUpdate();
+            if (credit.executeUpdate() == 0) {
+                conn.rollback();  // no such receiver: undo the debit too
+                return false;
+            }
 
             conn.commit();
             return true;
@@ -166,7 +170,7 @@ def safe_transfer(conn: pycubrid.Connection, sender: str, receiver: str, amount:
 
     try:
         cursor.execute(
-            "UPDATE cookbook_accounts SET balance = balance - ? WHERE owner = ? AND balance >= ?",
+            "UPDATE cookbook_jdbc_accounts SET balance = balance - ? WHERE owner = ? AND balance >= ?",
             (amount, sender, amount),
         )
 
@@ -175,9 +179,14 @@ def safe_transfer(conn: pycubrid.Connection, sender: str, receiver: str, amount:
             return False
 
         cursor.execute(
-            "UPDATE cookbook_accounts SET balance = balance + ? WHERE owner = ?",
+            "UPDATE cookbook_jdbc_accounts SET balance = balance + ? WHERE owner = ?",
             (amount, receiver),
         )
+        if cursor.rowcount == 0:
+            # No such receiver: roll back the debit too, or the money disappears.
+            conn.rollback()
+            return False
+
         conn.commit()
         return True
 
@@ -189,7 +198,7 @@ def safe_transfer(conn: pycubrid.Connection, sender: str, receiver: str, amount:
         cursor.close()
 
 
-def savepoint_pattern(conn: pycubrid.Connection) -> None:
+def savepoint_pattern(conn: Connection) -> None:
     """Savepoints — partial rollback within a transaction.
 
     Java:
@@ -212,7 +221,7 @@ def savepoint_pattern(conn: pycubrid.Connection) -> None:
     cursor = conn.cursor()
 
     cursor.execute(
-        "UPDATE cookbook_accounts SET balance = balance + ? WHERE owner = ?",
+        "UPDATE cookbook_jdbc_accounts SET balance = balance + ? WHERE owner = ?",
         (100.0, "Alice"),
     )
     print("  Step 1: Alice +$100")
@@ -220,7 +229,7 @@ def savepoint_pattern(conn: pycubrid.Connection) -> None:
     cursor.execute("SAVEPOINT after_alice_bonus")
 
     cursor.execute(
-        "UPDATE cookbook_accounts SET balance = balance + ? WHERE owner = ?",
+        "UPDATE cookbook_jdbc_accounts SET balance = balance + ? WHERE owner = ?",
         (999.0, "Bob"),
     )
     print("  Step 2: Bob +$999 (will undo)")
@@ -256,7 +265,7 @@ def autocommit_pattern() -> None:
 
     cursor = conn.cursor()
     cursor.execute(
-        "UPDATE cookbook_accounts SET balance = balance + ? WHERE owner = ?",
+        "UPDATE cookbook_jdbc_accounts SET balance = balance + ? WHERE owner = ?",
         (1.0, "Charlie"),
     )
     print("  Charlie +$1 (auto-committed, no explicit commit needed)")
@@ -268,9 +277,9 @@ def autocommit_pattern() -> None:
     conn.close()
 
 
-def cleanup(conn: pycubrid.Connection) -> None:
+def cleanup(conn: Connection) -> None:
     cursor = conn.cursor()
-    cursor.execute("DROP TABLE IF EXISTS cookbook_accounts")
+    cursor.execute("DROP TABLE IF EXISTS cookbook_jdbc_accounts")
     conn.commit()
     cursor.close()
     print("\nCleaned up")
@@ -289,6 +298,8 @@ if __name__ == "__main__":
         print(f"  Transfer Alice->Charlie $100: {'success' if ok else 'failed'}")
         ok = safe_transfer(conn, "Bob", "Alice", 9999.0)
         print(f"  Transfer Bob->Alice $9999: {'success' if ok else 'failed (insufficient)'}")
+        ok = safe_transfer(conn, "Alice", "Nobody", 50.0)
+        print(f"  Transfer Alice->Nobody $50: {'success' if ok else 'failed (no receiver)'}")
         show_balances(conn, "after transfers")
 
         savepoint_pattern(conn)

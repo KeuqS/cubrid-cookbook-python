@@ -19,13 +19,16 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, Session, rela
 # Same DATABASE_URL convention as the dashboard recipes (templates/dashboard/*.py).
 DATABASE_URL = os.environ.get("DATABASE_URL", "cubrid+pycubrid://dba@localhost:33000/testdb")
 
+# Recipe-owned username: a rerun deletes only this demo user, never a reader's "alice".
+DEMO_USERNAME = "cookbook_demo_alice"
+
 
 class Base(DeclarativeBase):
     pass
 
 
 class ChatUser(Base):
-    __tablename__ = "chat_users"
+    __tablename__ = "cookbook_chat_users"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(50), unique=True)
@@ -37,10 +40,10 @@ class ChatUser(Base):
 
 
 class ChatConversation(Base):
-    __tablename__ = "chat_conversations"
+    __tablename__ = "cookbook_chat_conversations"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("chat_users.id"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("cookbook_chat_users.id"))
     title: Mapped[str] = mapped_column(String(200), default="New conversation")
     status: Mapped[str] = mapped_column(String(20), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=sa.text("SYS_DATETIME"))
@@ -54,10 +57,10 @@ class ChatConversation(Base):
 
 
 class ChatMessage(Base):
-    __tablename__ = "chat_messages"
+    __tablename__ = "cookbook_chat_messages"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id"))
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("cookbook_chat_conversations.id"))
     role: Mapped[str] = mapped_column(String(20))  # user / assistant / system / tool
     content: Mapped[str] = mapped_column(Text)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
@@ -78,9 +81,24 @@ def main() -> None:
         Base.metadata.create_all(engine)
 
         with Session(engine) as session:
+            # Rerunnable: remove the previous run's demo user and its
+            # conversations and messages (children first).
+            demo_user = sa.select(ChatUser.id).where(ChatUser.username == DEMO_USERNAME)
+            demo_convs = sa.select(ChatConversation.id).where(
+                ChatConversation.user_id.in_(demo_user)
+            )
+            session.execute(
+                sa.delete(ChatMessage).where(ChatMessage.conversation_id.in_(demo_convs))
+            )
+            session.execute(
+                sa.delete(ChatConversation).where(ChatConversation.user_id.in_(demo_user))
+            )
+            session.execute(sa.delete(ChatUser).where(ChatUser.username == DEMO_USERNAME))
+            session.commit()
+
             # Create a user with AI preferences stored as JSON
             user = ChatUser(
-                username="alice",
+                username=DEMO_USERNAME,
                 display_name="Alice Kim",
                 preferences={"model": "gpt-4", "temperature": 0.7, "max_tokens": 2000},
             )
@@ -102,12 +120,14 @@ def main() -> None:
                 ("assistant", "You have tables for users, products, and orders."),
             ]
 
-            for role, content in exchanges:
+            # Number the turns from the loop: conv.messages was loaded once when it was
+            # empty and is never refreshed, so len(conv.messages) would stay 0.
+            for turn, (role, content) in enumerate(exchanges):
                 msg = ChatMessage(
                     conversation_id=conv.id,
                     role=role,
                     content=content,
-                    metadata_={"turn": len(conv.messages), "source": "demo"},
+                    metadata_={"turn": turn, "source": "demo"},
                     token_count=len(content.split()),
                 )
                 session.add(msg)
@@ -127,10 +147,13 @@ def main() -> None:
 
             print(f"\nConversation transcript ({len(msgs)} messages):")
             for m in msgs:
-                print(f"  [{m.role}] {m.content[:60]} (tokens: {m.token_count})")
+                print(
+                    f"  turn {m.metadata_['turn']} [{m.role}] {m.content[:60]}"
+                    f" (tokens: {m.token_count})"
+                )
 
-            # Verify JSON metadata round-trip
-            assert msgs[0].metadata_["turn"] == 0
+            # Verify JSON metadata round-trip: one turn number per message, in order
+            assert [m.metadata_["turn"] for m in msgs] == list(range(len(exchanges)))
             assert msgs[0].metadata_["source"] == "demo"
             print("\n  JSON metadata round-trip: ✓")
 

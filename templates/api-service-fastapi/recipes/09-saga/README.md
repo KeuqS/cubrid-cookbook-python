@@ -15,7 +15,7 @@ Standalone FastAPI recipe implementing a Saga with compensating transactions for
 ## Install
 
 ```bash
-cd /data/GitHub/cubrid-cookbook/python/fastapi/09-saga
+cd templates/api-service-fastapi/recipes/09-saga   # from the repository root
 pip install -r requirements.txt
 ```
 
@@ -37,6 +37,7 @@ Default database URL:
 - `POST /orders/{order_key}/execute`
 - `GET /orders/{order_key}`
 - `GET /orders/{order_key}/steps`
+- `POST /orders/{order_key}/recover`
 
 ## curl examples
 
@@ -81,6 +82,31 @@ Get step history:
 ```bash
 curl -X GET "http://127.0.0.1:8000/orders/O-1/steps"
 ```
+
+Recover an order stuck in `processing`:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/orders/O-1/recover" \
+  -H "Content-Type: application/json" \
+  -d '{"timeout_seconds":300}'
+```
+
+## Recovering a stuck order
+
+`POST /orders/{order_key}/execute` commits each step's effect (the stock
+reservation, the payment hold) in the same transaction that marks the step
+`done`. If the process dies part way, the order stays `processing`.
+
+`POST /orders/{order_key}/recover` puts such an order back to `pending`, but only
+after it has been `processing` for longer than `timeout_seconds` (default 300); a
+younger order returns 409. The reset is a conditional UPDATE on the order's
+version and state. The age is measured from the order's last update, and the step
+commits do not touch the order, so a run that is still active after
+`timeout_seconds` can be reset. Pick a timeout well above the longest run.
+
+Calling `execute` again then resumes the saga: steps already marked `done` are
+skipped, not repeated, so each step takes effect exactly once. If a later step
+fails, the skipped steps are compensated like any other completed step.
 
 ## Test
 

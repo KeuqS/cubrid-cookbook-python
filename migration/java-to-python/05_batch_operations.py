@@ -35,6 +35,7 @@ from __future__ import annotations
 import time
 
 import pycubrid
+from pycubrid.connection import Connection
 
 DB_CONFIG = {
     "host": "localhost",
@@ -45,11 +46,11 @@ DB_CONFIG = {
 }
 
 
-def get_connection() -> pycubrid.Connection:
+def get_connection() -> Connection:
     return pycubrid.connect(**DB_CONFIG)
 
 
-def setup(conn: pycubrid.Connection) -> None:
+def setup(conn: Connection) -> None:
     cursor = conn.cursor()
     cursor.execute("DROP TABLE IF EXISTS cookbook_sensors")
     cursor.execute("""
@@ -64,7 +65,7 @@ def setup(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def batch_insert_executemany(conn: pycubrid.Connection) -> None:
+def batch_insert_executemany(conn: Connection) -> None:
     """Batch INSERT using executemany.
 
     Java equivalent (addBatch/executeBatch):
@@ -102,7 +103,7 @@ def batch_insert_executemany(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def batch_insert_chunked(conn: pycubrid.Connection) -> None:
+def batch_insert_chunked(conn: Connection) -> None:
     """Chunked batch insert for very large datasets.
 
     Java equivalent:
@@ -140,31 +141,39 @@ def batch_insert_chunked(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def batch_insert_single_commit(conn: pycubrid.Connection) -> None:
+def batch_insert_single_commit(conn: Connection) -> None:
     """Single-commit batch for maximum throughput.
 
     COMMIT is the most expensive operation (pycubrid 1.10.0 benchmarks).
     Minimizing commits maximizes throughput for trusted data.
 
-    Trade-off: If insertion fails mid-batch, all rows roll back.
+    Trade-off: if an insert fails mid-batch, nothing has been committed yet, but
+    the rows that did insert are still pending in the transaction. Nothing rolls
+    them back automatically, so the except block calls conn.rollback() to discard
+    the whole batch.
     """
     rows = [(f"fast_{i:05d}", i % 256, f"data_{i}") for i in range(2000)]
 
     cursor = conn.cursor()
 
     t0 = time.perf_counter()
-    cursor.executemany(
-        "INSERT INTO cookbook_sensors (val, cnt, file_data) VALUES (?, ?, ?)",
-        rows,
-    )
-    conn.commit()
+    try:
+        cursor.executemany(
+            "INSERT INTO cookbook_sensors (val, cnt, file_data) VALUES (?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    except pycubrid.DatabaseError:
+        conn.rollback()
+        cursor.close()
+        raise
     elapsed = time.perf_counter() - t0
 
     print(f"single commit: inserted {len(rows)} rows in {elapsed * 1000:.1f}ms")
     cursor.close()
 
 
-def batch_update(conn: pycubrid.Connection) -> None:
+def batch_update(conn: Connection) -> None:
     """Batch UPDATE using executemany.
 
     Java:
@@ -193,7 +202,7 @@ def batch_update(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def batch_delete(conn: pycubrid.Connection) -> None:
+def batch_delete(conn: Connection) -> None:
     """Batch DELETE — single statement with IN clause.
 
     Java:
@@ -219,7 +228,7 @@ def batch_delete(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def verify_counts(conn: pycubrid.Connection) -> None:
+def verify_counts(conn: Connection) -> None:
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM cookbook_sensors")
     total = cursor.fetchone()[0]
@@ -227,7 +236,7 @@ def verify_counts(conn: pycubrid.Connection) -> None:
     cursor.close()
 
 
-def cleanup(conn: pycubrid.Connection) -> None:
+def cleanup(conn: Connection) -> None:
     cursor = conn.cursor()
     cursor.execute("DROP TABLE IF EXISTS cookbook_sensors")
     conn.commit()

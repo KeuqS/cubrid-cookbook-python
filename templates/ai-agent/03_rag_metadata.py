@@ -26,7 +26,7 @@ DB_CONFIG = {
 
 DDL = [
     """
-    CREATE TABLE IF NOT EXISTS rag_documents (
+    CREATE TABLE IF NOT EXISTS cookbook_rag_documents (
         id INT AUTO_INCREMENT PRIMARY KEY,
         title VARCHAR(200) NOT NULL,
         source VARCHAR(500),
@@ -38,18 +38,18 @@ DDL = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS rag_chunks (
+    CREATE TABLE IF NOT EXISTS cookbook_rag_chunks (
         id INT AUTO_INCREMENT PRIMARY KEY,
         document_id INT NOT NULL,
         chunk_index INT NOT NULL,
         content STRING,
         token_count INT,
         embedding_ref VARCHAR(500),
-        FOREIGN KEY (document_id) REFERENCES rag_documents(id)
+        FOREIGN KEY (document_id) REFERENCES cookbook_rag_documents(id)
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS rag_retrieval_log (
+    CREATE TABLE IF NOT EXISTS cookbook_rag_retrieval_log (
         id INT AUTO_INCREMENT PRIMARY KEY,
         query_text STRING,
         retrieved_doc_ids SEQUENCE(INT),
@@ -60,6 +60,10 @@ DDL = [
     """,
 ]
 
+# Ownership marker stored in each sample document's metadata. A rerun deletes
+# only documents carrying it, never a reader's documents with the same source.
+DEMO_MARKER = "cookbook-ai-agent-rag-demo"
+
 SAMPLE_DOCS = [
     {
         "title": "CUBRID Python Driver Guide",
@@ -68,7 +72,12 @@ SAMPLE_DOCS = [
         "It supports sync and async connections, LOB handling, "
         "parameterized queries, and works on Python 3.11+.",
         "tags": ["driver", "python", "getting-started"],
-        "metadata": {"author": "cubrid-lab", "type": "documentation", "version": "1.7"},
+        "metadata": {
+            "author": "cubrid-lab",
+            "type": "documentation",
+            "version": "1.7",
+            "recipe": DEMO_MARKER,
+        },
     },
     {
         "title": "SQLAlchemy CUBRID Dialect",
@@ -77,7 +86,12 @@ SAMPLE_DOCS = [
         "supporting ORM, Core, Alembic migrations, JSON types, "
         "and three driver backends.",
         "tags": ["orm", "sqlalchemy", "python"],
-        "metadata": {"author": "cubrid-lab", "type": "documentation", "version": "1.7"},
+        "metadata": {
+            "author": "cubrid-lab",
+            "type": "documentation",
+            "version": "1.7",
+            "recipe": DEMO_MARKER,
+        },
     },
     {
         "title": "MCP Server for CUBRID",
@@ -86,7 +100,12 @@ SAMPLE_DOCS = [
         "lets LLM clients safely query CUBRID with read-only "
         "whitelisting and opt-in write mode.",
         "tags": ["mcp", "ai", "llm", "safety"],
-        "metadata": {"author": "cubrid-lab", "type": "tool", "version": "0.4"},
+        "metadata": {
+            "author": "cubrid-lab",
+            "type": "tool",
+            "version": "0.4",
+            "recipe": DEMO_MARKER,
+        },
     },
 ]
 
@@ -95,6 +114,24 @@ def setup(conn: pycubrid.connection.Connection) -> None:
     cur = conn.cursor()
     for ddl in DDL:
         cur.execute(ddl)
+    conn.commit()
+    cur.close()
+
+
+def remove_demo_documents(conn: pycubrid.connection.Connection) -> None:
+    """Delete the sample documents of a previous run, with their chunks (children first).
+
+    Only documents whose metadata carries DEMO_MARKER are removed, so the demo
+    can run again on the same database without retrieving duplicates.
+    """
+    owned = "JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.recipe')) = ?"
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM cookbook_rag_chunks WHERE document_id IN "
+        "(SELECT id FROM cookbook_rag_documents WHERE " + owned + ")",
+        [DEMO_MARKER],
+    )
+    cur.execute("DELETE FROM cookbook_rag_documents WHERE " + owned, [DEMO_MARKER])
     conn.commit()
     cur.close()
 
@@ -115,7 +152,7 @@ def ingest_document(
     # Store the document with its metadata
     tags = "{" + ", ".join("?" for _ in doc["tags"]) + "}"
     cur.execute(
-        "INSERT INTO rag_documents (title, source, content, metadata, tags) "
+        "INSERT INTO cookbook_rag_documents (title, source, content, metadata, tags) "
         "VALUES (?, ?, ?, ?, " + tags + ")",
         [doc["title"], doc["source"], doc["content"], json.dumps(doc["metadata"]), *doc["tags"]],
     )
@@ -133,14 +170,16 @@ def ingest_document(
     # Store chunks with conceptual embedding references
     for i, chunk in enumerate(chunks):
         cur.execute(
-            "INSERT INTO rag_chunks (document_id, chunk_index, content, token_count, embedding_ref) "
+            "INSERT INTO cookbook_rag_chunks (document_id, chunk_index, content, token_count, embedding_ref) "
             "VALUES (?, ?, ?, ?, ?)",
             [doc_id, i, chunk, len(chunk.split()), f"vecstore://doc-{doc_id}/chunk-{i}"],
         )
     conn.commit()
 
     # Update chunk count
-    cur.execute("UPDATE rag_documents SET chunk_count = ? WHERE id = ?", [len(chunks), doc_id])
+    cur.execute(
+        "UPDATE cookbook_rag_documents SET chunk_count = ? WHERE id = ?", [len(chunks), doc_id]
+    )
     conn.commit()
     cur.close()
     return doc_id
@@ -154,7 +193,7 @@ def keyword_search(
     with CUBRID-side filtering."""
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, title, metadata FROM rag_documents WHERE content LIKE ? ORDER BY id",
+        "SELECT id, title, metadata FROM cookbook_rag_documents WHERE content LIKE ? ORDER BY id",
         [f"%{query}%"],
     )
     results = []
@@ -165,7 +204,7 @@ def keyword_search(
         # With decode_collections=True the column itself decodes (see
         # fundamentals/pycubrid/10_collection_columns.py).
         cur.execute(
-            "SELECT t.tag FROM rag_documents, TABLE(tags) AS t(tag) WHERE id = ?",
+            "SELECT t.tag FROM cookbook_rag_documents, TABLE(tags) AS t(tag) WHERE id = ?",
             [row[0]],
         )
         results.append(
@@ -192,7 +231,7 @@ def log_retrieval(
     # Collection members are scalar bound values, not a quoted '{...}' string.
     ids_seq = "{" + ", ".join("?" for _ in doc_ids) + "}"
     cur.execute(
-        "INSERT INTO rag_retrieval_log (query_text, retrieved_doc_ids, llm_response, relevance_scores) "
+        "INSERT INTO cookbook_rag_retrieval_log (query_text, retrieved_doc_ids, llm_response, relevance_scores) "
         "VALUES (?, " + ids_seq + ", ?, ?)",
         [query, *doc_ids, llm_response, json.dumps(scores)],
     )
@@ -204,7 +243,8 @@ def main() -> None:
     with closing(pycubrid.connect(**DB_CONFIG)) as conn:
         setup(conn)
 
-        # Ingest sample documents
+        # Ingest sample documents, replacing any copies from a previous run
+        remove_demo_documents(conn)
         print("Ingesting documents...")
         for doc in SAMPLE_DOCS:
             doc_id = ingest_document(conn, doc)
@@ -232,19 +272,19 @@ def main() -> None:
             llm_response,
             [0.92] * len(results),
         )
-        print("  Logged to rag_retrieval_log")
+        print("  Logged to cookbook_rag_retrieval_log")
 
         # Verify: retrieve logged interactions with JSON scores
         cur = conn.cursor()
         cur.execute(
             "SELECT id, query_text, relevance_scores "
-            "FROM rag_retrieval_log ORDER BY id DESC LIMIT 1"
+            "FROM cookbook_rag_retrieval_log ORDER BY id DESC LIMIT 1"
         )
         row = cur.fetchone()
         if row:
             print(f"  Logged query: {row[1][:40]}...")
             cur.execute(
-                "SELECT d.doc_id FROM rag_retrieval_log, TABLE(retrieved_doc_ids) AS d(doc_id) "
+                "SELECT d.doc_id FROM cookbook_rag_retrieval_log, TABLE(retrieved_doc_ids) AS d(doc_id) "
                 "WHERE id = ?",
                 [row[0]],
             )

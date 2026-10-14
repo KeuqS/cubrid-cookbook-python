@@ -85,8 +85,24 @@ for row in session.execute(stmt).scalars():
     process(row)
 ```
 
+## Running the Benchmark
+
+`benchmark.py` connects to `localhost:33000`, database `testdb`, user `dba` with an empty password,
+which is what the repository's `docker-compose.yml` provides. From the repository root:
+
+```bash
+CUBRID_VERSION=11.4 docker compose up -d --wait cubrid   # CUBRID 11.4 on localhost:33000, database testdb
+pip install pycubrid
+python performance/fetch-optimization/benchmark.py
+docker compose down                    # stop the database when finished
+```
+
+The script creates and fills `cookbook_fetch_test` (10,000 rows), prints the time of each fetch strategy and takes about 15 seconds.
+
 ## Benchmark Reference
 
-- pycubrid 1.10.0 (2026-10-09, median of 5): 10K rows, 5 columns `fetchall()` 52 ms; 2 columns 28 ms; `SELECT *` 50 ms
+- pycubrid 1.10.0 (2026-10-09, median of 5): 10K rows, 5 columns `fetchall()` 52 ms; 2 columns 28 ms
+- pycubrid 1.12.0 (2026-10-13, median of 5, same host): `fetchmany(500)` loop over the 5 columns 49 ms (47–77).
+  It replaces the earlier `SELECT *` measurement, which ran the same query as the 5-column `fetchall()`.
 - Historical (pycubrid 0.5.0+16a8634): SELECT 10K fetch 96ms → 78ms after optimization (−19%)
 - Full details: [cubrid-benchmark/experiments/driver-comparison](https://github.com/cubrid-lab/cubrid-benchmark/tree/main/experiments/driver-comparison)

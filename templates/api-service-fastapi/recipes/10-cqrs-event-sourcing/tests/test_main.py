@@ -5,7 +5,7 @@ from typing import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -18,7 +18,7 @@ if str(ROOT_DIR) not in sys.path:
 import database
 import main
 from database import get_db
-from models import EventStore
+from models import AccountReadModel, EventStore
 
 
 @pytest.fixture()
@@ -221,3 +221,78 @@ def test_read_model_sequence_matches_tail(client: TestClient) -> None:
         )
 
     assert read_model_seq == tail
+
+
+def _drift_read_model(engine: Engine, account_id: str = "acct-1") -> None:
+    """Corrupt the read model the way a lost or misapplied projection would."""
+    with engine.begin() as conn:
+        conn.execute(
+            update(AccountReadModel)
+            .where(AccountReadModel.account_id == account_id)
+            .values(balance_cents=1, owner_name="drifted")
+        )
+
+
+@pytest.mark.parametrize("from_scratch", [1, 0], ids=["from-scratch", "snapshot-and-tail"])
+def test_rebuild_repairs_a_drifted_read_model(
+    client: TestClient, engine: Engine, from_scratch: int
+) -> None:
+    _open_account(client)
+    deposit = client.post(
+        "/accounts/acct-1/deposit",
+        json={"amount_cents": 4000, "expected_sequence_no": 1},
+    )
+    assert deposit.status_code == 200
+    if from_scratch == 0:
+        assert client.post("/accounts/acct-1/snapshot").status_code == 200
+    _drift_read_model(engine)
+    assert client.get("/accounts/acct-1").json()["balance_cents"] == 1
+
+    rebuild_response = client.post("/accounts/acct-1/rebuild", json={"from_scratch": from_scratch})
+
+    assert rebuild_response.status_code == 200
+    rebuilt = rebuild_response.json()
+    assert (rebuilt["balance_cents"], rebuilt["owner_name"]) == (4000, "Alice")
+    assert rebuilt["last_sequence_no"] == 2
+    stored = client.get("/accounts/acct-1").json()
+    assert (stored["balance_cents"], stored["owner_name"]) == (4000, "Alice")
+
+
+def test_rebuild_does_not_rewind_a_newer_command(
+    client: TestClient, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import routes
+    from schemas import AmountCommandRequest
+
+    _open_account(client)
+    deposit = client.post(
+        "/accounts/acct-1/deposit",
+        json={"amount_cents": 4000, "expected_sequence_no": 1},
+    )
+    assert deposit.status_code == 200
+
+    # A deposit commits on another session after the rebuild replayed the stream
+    # (tail 2) and before it writes the read model.
+    original = routes._project_read_model
+    pending = [True]
+
+    def project_after_a_concurrent_deposit(db, account_id, state, sequence_no, **kwargs):
+        if pending:
+            pending.clear()
+            other = sessionmaker(bind=engine, autoflush=False)()
+            try:
+                routes.deposit(
+                    "acct-1", AmountCommandRequest(amount_cents=500, expected_sequence_no=2), other
+                )
+            finally:
+                other.close()
+        return original(db, account_id, state, sequence_no, **kwargs)
+
+    monkeypatch.setattr(routes, "_project_read_model", project_after_a_concurrent_deposit)
+    rebuild_response = client.post("/accounts/acct-1/rebuild", json={"from_scratch": 1})
+    monkeypatch.undo()
+
+    assert not pending
+    assert rebuild_response.status_code == 409
+    stored = client.get("/accounts/acct-1").json()
+    assert (stored["balance_cents"], stored["last_sequence_no"]) == (4500, 3)
